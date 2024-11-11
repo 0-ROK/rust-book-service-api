@@ -41,14 +41,17 @@ impl SupabaseClient {
 async fn create_book(supabase: web::Data<SupabaseClient>, book: web::Json<Book>) -> impl Responder {
     let new_book = book.into_inner();
     
-    let insert_data = serde_json::json!({
+    let json_data = serde_json::json!({
         "title": new_book.title,
         "author": new_book.author,
     });
 
+    let json_string = serde_json::to_string(&json_data).unwrap();
+    
+
     match supabase.client
         .from("books")
-        .insert(insert_data)
+        .insert(json_string)
         .execute()
         .await
     {
