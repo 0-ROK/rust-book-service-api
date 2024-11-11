@@ -26,7 +26,46 @@ impl SupabaseClient {
         let supabase_key = env::var("SUPABASE_KEY")?;
 
         let client = Postgrest::new(supabase_url)
-            .insert_header("apikey", &supabase_key);
+            .insert_header("apikey", &supabase_key)
+            .insert_header("Content-Type", "application/json");
+
+        // 환경 변수 로드 시도를 로깅
+        println!("Loading environment variables...");
+        
+        let supabase_url = match env::var("SUPABASE_URL") {
+            Ok(url) => {
+                println!("✅ SUPABASE_URL loaded successfully");
+                let url = if !url.ends_with("/rest/v1") {
+                    format!("{}/rest/v1", url)
+                } else {
+                    url
+                };
+                url
+            },
+            Err(e) => {
+                println!("❌ Failed to load SUPABASE_URL: {:?}", e);
+                return Err(Box::new(e));
+            }
+        };
+
+        let supabase_key = match env::var("SUPABASE_KEY") {
+            Ok(key) => {
+                println!("✅ SUPABASE_KEY loaded successfully");
+                key
+            },
+            Err(e) => {
+                println!("❌ Failed to load SUPABASE_KEY: {:?}", e);
+                return Err(Box::new(e));
+            }
+        };
+
+        println!("🔄 Initializing Supabase client...");
+        let client = Postgrest::new(supabase_url)
+            .insert_header("apikey", &supabase_key)
+            .insert_header("Authorization", format!("Bearer {}", supabase_key))
+            .insert_header("Content-Type", "application/json");
+        
+        println!("✅ Supabase client initialized successfully");
 
         Ok(SupabaseClient { client })
     }
@@ -47,7 +86,8 @@ async fn create_book(supabase: web::Data<SupabaseClient>, book: web::Json<Book>)
     });
 
     let json_string = serde_json::to_string(&json_data).unwrap();
-    
+
+    println!("📝 Attempting to insert book: {}", json_string);
 
     match supabase.client
         .from("books")
@@ -56,12 +96,30 @@ async fn create_book(supabase: web::Data<SupabaseClient>, book: web::Json<Book>)
         .await
     {
         Ok(response) => {
-            match response.status() {
+            println!("📨 Response received: {:?}", response);
+            println!("📊 Response status: {:?}", response.status());
+            println!("🔍 Response headers: {:?}", response.headers());
+
+            // 상태 코드를 먼저 확인
+            let status = response.status();
+            
+            // 응답 본문 로깅
+            if let Ok(text) = response.text().await {
+                println!("📄 Response body: {}", text);
+            }
+
+            match status {
                 StatusCode::CREATED => HttpResponse::Created().json(new_book),
-                _ => HttpResponse::InternalServerError().finish(),
+                _ => {
+                    println!("⚠️ Unexpected status code: {:?}", status);
+                    HttpResponse::InternalServerError().finish()
+                }
             }
         },
-        Err(_) => HttpResponse::InternalServerError().finish(),
+        Err(e) => {
+            println!("❌ Error during request: {:?}", e);
+            HttpResponse::InternalServerError().finish()
+        }
     }
 }
 
