@@ -1,4 +1,4 @@
-use actix_web::{post, web, App, HttpResponse, HttpServer, Responder, http::StatusCode};
+use actix_web::{post, web, App, HttpResponse, HttpServer, Responder, http::StatusCode, get};
 use serde::{Deserialize, Serialize};
 use postgrest::Postgrest;
 use dotenv::dotenv;
@@ -106,6 +106,26 @@ impl SupabaseClient {
 
         Ok(())
     }
+
+    async fn get_all_books(&self) -> Result<Vec<Book>, Box<dyn std::error::Error>> {
+        println!("📚 Fetching all books from database...");
+        
+        let response = self.client
+            .from("books")
+            .select("*")
+            .execute()
+            .await?;
+
+        if response.status() != StatusCode::OK {
+            println!("❌ Failed to fetch books: {:?}", response.status());
+            return Err("Failed to fetch books".into());
+        }
+
+        let books: Vec<Book> = response.json().await?;
+        println!("✅ Successfully fetched {} books", books.len());
+        
+        Ok(books)
+    }
 }
 
 // 기존의 API 핸들러들은 그대로 유지
@@ -210,6 +230,21 @@ async fn create_dummy_books(
     }
 }
 
+#[get("/books")]
+async fn get_books(supabase: web::Data<SupabaseClient>) -> impl Responder {
+    match supabase.get_all_books().await {
+        Ok(books) => {
+            HttpResponse::Ok().json(books)
+        },
+        Err(e) => {
+            println!("❌ Error fetching books: {:?}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to fetch books"
+            }))
+        }
+    }
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     // Supabase 클라이언트 초기화
@@ -224,6 +259,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(supabase_client.clone()))
+            .service(get_books)
             .service(create_book)
             .service(create_dummy_books)
     })
