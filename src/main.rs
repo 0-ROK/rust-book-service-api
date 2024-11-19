@@ -1,16 +1,25 @@
-use actix_web::{get, post, put, delete, web, App, HttpResponse, HttpServer, Responder, http::StatusCode};
+use actix_web::{post, web, App, HttpResponse, HttpServer, Responder, http::StatusCode};
 use serde::{Deserialize, Serialize};
 use postgrest::Postgrest;
 use dotenv::dotenv;
 use std::env;
 use serde_json;
+use rand::Rng;
 
 // 기존 Book 구조체는 그대로 유지
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct Book {
     id: u32,
     title: String,
     author: String,
+}
+
+// Book 구조체 아래에 DummyBooksResponse 구조체 추가
+#[derive(Debug, Serialize)]
+struct DummyBooksResponse {
+    success: bool,
+    count: usize,
+    books: Vec<Book>,
 }
 
 // Supabase 클라이언트를 위한 새로운 구조체
@@ -71,10 +80,38 @@ impl SupabaseClient {
     }
 
     // Supabase 관련 메서드를 여기에 추가할 수 있습니다.
+
+    async fn insert_multiple_books(&self, books: Vec<Book>) -> Result<(), Box<dyn std::error::Error>> {
+        let json_data: Vec<serde_json::Value> = books
+            .into_iter()
+            .map(|book| {
+                serde_json::json!({
+                    "title": book.title,
+                    "author": book.author,
+                })
+            })
+            .collect();
+
+        let json_string = serde_json::to_string(&json_data)?;
+        
+        let response = self.client
+            .from("books")
+            .insert(json_string)
+            .execute()
+            .await?;
+
+        if response.status() != StatusCode::CREATED {
+            return Err("Failed to insert books".into());
+        }
+
+        Ok(())
+    }
 }
 
 // 기존의 API 핸들러들은 그대로 유지
 // get_books, get_book, create_book, update_book, delete_book
+
+
 
 #[post("/books")]
 async fn create_book(supabase: web::Data<SupabaseClient>, book: web::Json<Book>) -> impl Responder {
@@ -123,6 +160,56 @@ async fn create_book(supabase: web::Data<SupabaseClient>, book: web::Json<Book>)
     }
 }
 
+#[post("/dummy-books/{count}")]
+async fn create_dummy_books(
+    supabase: web::Data<SupabaseClient>,
+    count: web::Path<usize>,
+) -> impl Responder {
+    let count = count.into_inner();
+    let mut rng = rand::thread_rng();
+    
+    // 더미 데이터용 샘플 제목과 작가
+    let titles = vec![
+        "The Hidden Forest", "Midnight Dreams", "The Last Echo",
+        "Silent Waters", "Beyond the Stars", "Whispers in the Wind",
+        "The Forgotten Path", "Dancing Shadows", "The Crystal Key",
+        "Eternal Sunrise", "The Silver Mirror", "Ocean's Secret"
+    ];
+    
+    let authors = vec![
+        "Emma Stone", "James Wilson", "Sarah Parker",
+        "Michael Brown", "Laura Davis", "Robert Smith",
+        "Jennifer Lee", "David Miller", "Maria Garcia",
+        "John Anderson", "Lisa Thompson", "William Taylor"
+    ];
+
+    let dummy_books: Vec<Book> = (0..count)
+        .map(|id| Book {
+            id: id as u32,
+            title: titles[rng.gen_range(0..titles.len())].to_string(),
+            author: authors[rng.gen_range(0..authors.len())].to_string(),
+        })
+        .collect();
+
+    match supabase.insert_multiple_books(dummy_books.clone()).await {
+        Ok(_) => {
+            let response = DummyBooksResponse {
+                success: true,
+                count,
+                books: dummy_books,
+            };
+            HttpResponse::Created().json(response)
+        },
+        Err(e) => {
+            println!("❌ Error creating dummy books: {:?}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "success": false,
+                "error": "Failed to create dummy books"
+            }))
+        }
+    }
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     // Supabase 클라이언트 초기화
@@ -138,6 +225,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(web::Data::new(supabase_client.clone()))
             .service(create_book)
+            .service(create_dummy_books)
     })
     .bind("127.0.0.1:8080")?
     .run()

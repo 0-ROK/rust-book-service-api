@@ -300,6 +300,7 @@ dependencies = [
  "actix-web",
  "dotenv",
  "postgrest",
+ "rand",
  "serde",
  "serde_json",
  "tokio",
