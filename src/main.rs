@@ -1,4 +1,5 @@
 use actix_web::{post, web, App, HttpResponse, HttpServer, Responder, http::StatusCode, get};
+use actix_cors::Cors;
 use serde::{Deserialize, Serialize};
 use postgrest::Postgrest;
 use dotenv::dotenv;
@@ -257,7 +258,15 @@ async fn main() -> std::io::Result<()> {
     };
 
     HttpServer::new(move || {
+        // CORS 설정 추가
+        let cors = Cors::default()
+            .allowed_origin("http://localhost:3000")
+            .allowed_methods(vec!["GET", "POST", "PUT", "DELETE"])
+            .allowed_headers(vec!["Content-Type", "Authorization"])
+            .max_age(3600);
+
         App::new()
+            .wrap(cors)  // CORS 미들웨어 추가
             .app_data(web::Data::new(supabase_client.clone()))
             .service(get_books)
             .service(create_book)
